@@ -1,0 +1,9 @@
+{
+  "id": "zotero-connector",
+  "name": "Zotero Connector",
+  "version": "1.0.0",
+  "minAppVersion": "1.11.4",
+  "description": "Automatically create and update literature notes from Zotero items tagged with a configurable tag.",
+  "author": "You",
+  "isDesktopOnly": false
+}

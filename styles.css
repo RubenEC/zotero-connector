@@ -1,0 +1,23 @@
+/* Zotero Auto-Sync Settings */
+
+.color-map-container {
+  margin-bottom: 1em;
+}
+
+.color-map-entry .setting-item-control {
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.color-map-entry .setting-item-control input[type="color"] {
+  width: 40px;
+  height: 30px;
+  padding: 2px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.color-map-entry .setting-item-control input[type="text"] {
+  min-width: 120px;
+}
