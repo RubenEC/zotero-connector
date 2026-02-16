@@ -176,20 +176,55 @@ export class ZoteroApiClient {
   }
 
   async fetchItemChildren(itemKey: string): Promise<ZoteroItem[]> {
-    const response = await this.request(`/items/${itemKey}/children`, {
-      format: 'json',
-      include: 'data',
-    });
-    return response.json;
+    const allChildren: ZoteroItem[] = [];
+    let start = 0;
+
+    while (true) {
+      const response = await this.request(`/items/${itemKey}/children`, {
+        format: 'json',
+        include: 'data',
+        limit: String(PAGE_LIMIT),
+        start: String(start),
+      });
+
+      const items: ZoteroItem[] = response.json;
+      allChildren.push(...items);
+
+      const totalResults = parseInt(response.headers['total-results'] || '0', 10);
+      start += PAGE_LIMIT;
+
+      if (start >= totalResults || items.length < PAGE_LIMIT) {
+        break;
+      }
+    }
+
+    return allChildren;
   }
 
   async fetchAnnotations(attachmentKey: string): Promise<ZoteroItem[]> {
-    const response = await this.request(`/items/${attachmentKey}/children`, {
-      format: 'json',
-      include: 'data',
-    });
-    const items: ZoteroItem[] = response.json;
-    return items.filter(item => item.data.itemType === 'annotation');
+    const allItems: ZoteroItem[] = [];
+    let start = 0;
+
+    while (true) {
+      const response = await this.request(`/items/${attachmentKey}/children`, {
+        format: 'json',
+        include: 'data',
+        limit: String(PAGE_LIMIT),
+        start: String(start),
+      });
+
+      const items: ZoteroItem[] = response.json;
+      allItems.push(...items);
+
+      const totalResults = parseInt(response.headers['total-results'] || '0', 10);
+      start += PAGE_LIMIT;
+
+      if (start >= totalResults || items.length < PAGE_LIMIT) {
+        break;
+      }
+    }
+
+    return allItems.filter(item => item.data.itemType === 'annotation');
   }
 
   async fetchBibliography(itemKey: string): Promise<string> {
