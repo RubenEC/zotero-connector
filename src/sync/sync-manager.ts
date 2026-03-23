@@ -239,13 +239,22 @@ export class SyncManager {
         try {
           processed++;
           this.onProgress?.(processed, total);
-          // Use stored filename if available, otherwise generate and store
-          let filename = this.settings.itemFilenames[item.key];
-          if (!filename) {
-            filename = generateFilename(item, this.settings);
-            this.settings.itemFilenames[item.key] = filename;
-            await this.saveSettings();
+          // Generate filename from current item data
+          const freshFilename = generateFilename(item, this.settings);
+          let filename = this.settings.itemFilenames[item.key] || freshFilename;
+
+          // If citekey changed in Zotero, rename the existing file
+          if (this.settings.itemFilenames[item.key] && freshFilename !== filename) {
+            const oldPath = normalizePath(`${this.settings.outputFolder}/${filename}.md`);
+            const oldFile = this.app.vault.getAbstractFileByPath(oldPath);
+            if (oldFile && oldFile instanceof TFile) {
+              const newPath = normalizePath(`${this.settings.outputFolder}/${freshFilename}.md`);
+              await this.app.vault.rename(oldFile, newPath);
+            }
+            filename = freshFilename;
           }
+          this.settings.itemFilenames[item.key] = filename;
+          await this.saveSettings();
 
           const filePath = normalizePath(`${this.settings.outputFolder}/${filename}.md`);
           const existingFile = this.app.vault.getAbstractFileByPath(filePath);
@@ -347,13 +356,22 @@ export class SyncManager {
 
       await this.ensureFolder(this.settings.outputFolder);
 
-      // Use stored filename if available, otherwise generate and store
-      let filename = this.settings.itemFilenames[itemKey];
-      if (!filename) {
-        filename = generateFilename(item, this.settings);
-        this.settings.itemFilenames[itemKey] = filename;
-        await this.saveSettings();
+      // Generate filename from current item data
+      const freshFilename = generateFilename(item, this.settings);
+      let filename = this.settings.itemFilenames[itemKey] || freshFilename;
+
+      // If citekey changed in Zotero, rename the existing file
+      if (this.settings.itemFilenames[itemKey] && freshFilename !== filename) {
+        const oldPath = normalizePath(`${this.settings.outputFolder}/${filename}.md`);
+        const oldFile = this.app.vault.getAbstractFileByPath(oldPath);
+        if (oldFile && oldFile instanceof TFile) {
+          const newPath = normalizePath(`${this.settings.outputFolder}/${freshFilename}.md`);
+          await this.app.vault.rename(oldFile, newPath);
+        }
+        filename = freshFilename;
       }
+      this.settings.itemFilenames[itemKey] = filename;
+      await this.saveSettings();
 
       const syncData = await this.buildSyncData(item);
       syncData.citekey = filename;

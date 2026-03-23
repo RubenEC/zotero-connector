@@ -50,6 +50,15 @@ export default class ZoteroConnectorPlugin extends Plugin {
     });
 
     this.addCommand({
+      id: 'full-sync',
+      name: 'Full sync (re-import all)',
+      callback: async () => {
+        await this.clearSyncCache();
+        await this.runSync();
+      },
+    });
+
+    this.addCommand({
       id: 'sync-current-note',
       name: 'Sync current note',
       callback: async () => {
@@ -150,6 +159,9 @@ export default class ZoteroConnectorPlugin extends Plugin {
 
   async clearSyncCache(): Promise<void> {
     await this.versionTracker.clearAll();
+    this.settings.itemFilenames = {};
+    this.settings.lastSyncedTags = {};
+    await this.saveSettings();
     this.apiClient.clearCollectionCache();
   }
 

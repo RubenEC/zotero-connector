@@ -37,6 +37,11 @@ export function generateFilename(item: ZoteroItem, settings: ZoteroAutoSyncSetti
 }
 
 export function extractCitekey(data: ZoteroItem['data']): string {
+  // Zotero 7 native citation key field (preferred)
+  if (data.citationKey) {
+    return data.citationKey.trim();
+  }
+  // Legacy: Better BibTeX style in Extra field
   if (data.extra) {
     const match = data.extra.match(/Citation Key:\s*(.+)/i);
     if (match) {

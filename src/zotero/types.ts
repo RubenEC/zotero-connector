@@ -30,6 +30,7 @@ export interface ZoteroItemData {
   dateAdded?: string;
   dateModified?: string;
   extra?: string;
+  citationKey?: string;
   parentItem?: string;
 
   // Annotation fields

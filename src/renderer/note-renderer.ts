@@ -4,6 +4,16 @@ import { ZoteroAutoSyncSettings, ColorMapEntry } from '../types';
 const READING_SPEED = 220; // words per minute
 const WORDS_PER_PAGE = 360;
 
+/** ISO-8601 string in local timezone (e.g. 2026-02-17T22:34:00+01:00) */
+function localISOString(d: Date): string {
+  const off = d.getTimezoneOffset();
+  const local = new Date(d.getTime() - off * 60000);
+  const sign = off <= 0 ? '+' : '-';
+  const hh = String(Math.floor(Math.abs(off) / 60)).padStart(2, '0');
+  const mm = String(Math.abs(off) % 60).padStart(2, '0');
+  return local.toISOString().replace('Z', `${sign}${hh}:${mm}`);
+}
+
 export class NoteRenderer {
   private settings: ZoteroAutoSyncSettings;
 
@@ -95,7 +105,7 @@ export class NoteRenderer {
 
     // last-synced
     const now = new Date();
-    lines.push(`last-synced: ${now.toISOString()}`);
+    lines.push(`last-synced: ${localISOString(now)}`);
 
     // zotero-key
     lines.push(`zotero-key: ${item.key}`);
@@ -667,8 +677,8 @@ export class NoteRenderer {
       zotero_key: item.key,
       item_type: d.itemType,
       note_type_wikilink: noteTypeWikilink,
-      last_synced: now.toISOString(),
-      import_date: now.toISOString().split('T')[0],
+      last_synced: localISOString(now),
+      import_date: localISOString(now).split('T')[0],
       import_time: now.toTimeString().substring(0, 5),
 
       // Formatted blocks
