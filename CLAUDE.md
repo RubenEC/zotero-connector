@@ -24,9 +24,13 @@ cmd //c "obsidian dev:errors" 2>&1
 
 ## Obsidian Paths
 
-- **Vault**: `C:\Users\EckRJ\Documents\Ideaverse`
-- **Plugin deploy**: `C:\Users\EckRJ\Documents\Ideaverse\.obsidian\plugins\zotero-connector\`
-- **Literature notes**: `C:\Users\EckRJ\Documents\Ideaverse\References\Literature notes\`
+Paths differ by machine:
+
+| | Machine 1 (EckRJ) | Machine 2 (ruben) |
+|---|---|---|
+| **Vault** | `C:\Users\EckRJ\Documents\Ideaverse` | `C:\Users\ruben\Ideaverse` |
+| **Plugin deploy** | `...\Ideaverse\.obsidian\plugins\zotero-connector\` | same relative |
+| **Literature notes** | `...\Ideaverse\References\Literature notes\` | same relative |
 
 ## Architecture
 
