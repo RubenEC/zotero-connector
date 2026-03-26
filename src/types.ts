@@ -24,6 +24,7 @@ export interface ZoteroAutoSyncSettings {
   // Advanced
   preserveUserContent: boolean;
   markOrphaned: boolean;
+  preservedFrontmatterKeys: string[];
 
   // Internal
   lastSyncVersion: number;
@@ -67,6 +68,7 @@ export const DEFAULT_SETTINGS: ZoteroAutoSyncSettings = {
 
   preserveUserContent: true,
   markOrphaned: false,
+  preservedFrontmatterKeys: [],
 
   lastSyncVersion: 0,
   itemVersions: {},

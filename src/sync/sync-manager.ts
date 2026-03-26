@@ -288,7 +288,7 @@ export class SyncManager {
             { tag: this.settings.syncTag },
           ];
 
-          const content = await this.renderContent(syncData);
+          const content = await this.renderContent(syncData, existingContent);
 
           if (existingFile && existingFile instanceof TFile) {
             // Update existing file, preserving user comments if enabled
@@ -391,7 +391,7 @@ export class SyncManager {
         { tag: this.settings.syncTag },
       ];
 
-      const content = await this.renderContent(syncData);
+      const content = await this.renderContent(syncData, existingContent);
 
       if (existingFile && existingFile instanceof TFile) {
         if (this.settings.preserveUserContent) {
@@ -416,7 +416,7 @@ export class SyncManager {
     return result;
   }
 
-  private async renderContent(syncData: SyncItemData): Promise<string> {
+  private async renderContent(syncData: SyncItemData, existingContent?: string | null): Promise<string> {
     // If a template path is set, try to use it
     if (this.settings.templatePath) {
       let path = normalizePath(this.settings.templatePath);
@@ -432,7 +432,7 @@ export class SyncManager {
         console.warn(`[Zotero Connector] Template file not found: ${path}`);
       }
     }
-    return this.renderer.render(syncData);
+    return this.renderer.render(syncData, existingContent);
   }
 
   private async buildSyncData(item: ZoteroItem): Promise<SyncItemData> {

@@ -1,3 +1,4 @@
+import { parseYaml } from 'obsidian';
 import { ZoteroItem, ZoteroCreator, SyncItemData } from '../zotero/types';
 import { ZoteroAutoSyncSettings, ColorMapEntry } from '../types';
 
@@ -25,10 +26,10 @@ export class NoteRenderer {
     this.settings = settings;
   }
 
-  render(syncData: SyncItemData): string {
+  render(syncData: SyncItemData, existingContent?: string | null): string {
     const sections: string[] = [];
 
-    sections.push(this.renderFrontmatter(syncData));
+    sections.push(this.renderFrontmatter(syncData, existingContent));
     sections.push(this.renderCommentsSection());
     sections.push(this.renderArticleInfo(syncData));
     sections.push(this.renderAbstract(syncData));
@@ -41,7 +42,7 @@ export class NoteRenderer {
 
   // ── Section 0: YAML Frontmatter ──────────────────────────────────────
 
-  private renderFrontmatter(syncData: SyncItemData): string {
+  private renderFrontmatter(syncData: SyncItemData, existingContent?: string | null): string {
     const { item } = syncData;
     const d = item.data;
     const lines: string[] = ['---'];
@@ -110,8 +111,49 @@ export class NoteRenderer {
     // zotero-key
     lines.push(`zotero-key: ${item.key}`);
 
+    // Preserve frontmatter keys matching the preserved list
+    if (existingContent && this.settings.preservedFrontmatterKeys.length > 0) {
+      const existingFm = this.parseExistingFrontmatter(existingContent);
+      if (existingFm) {
+        for (const [key, value] of Object.entries(existingFm)) {
+          if (this.shouldPreserveKey(key)) {
+            if (Array.isArray(value)) {
+              lines.push(`${key}:`);
+              for (const item of value) {
+                lines.push(`- ${JSON.stringify(item)}`);
+              }
+            } else {
+              lines.push(`${key}: ${JSON.stringify(value)}`);
+            }
+          }
+        }
+      }
+    }
+
     lines.push('---');
     return lines.join('\n');
+  }
+
+  private parseExistingFrontmatter(content: string): Record<string, unknown> | null {
+    const match = content.match(/^---\n([\s\S]*?)\n---/);
+    if (!match) return null;
+    try {
+      return parseYaml(match[1]) as Record<string, unknown>;
+    } catch {
+      return null;
+    }
+  }
+
+  private shouldPreserveKey(key: string): boolean {
+    for (const pattern of this.settings.preservedFrontmatterKeys) {
+      if (pattern.endsWith('*')) {
+        const prefix = pattern.slice(0, -1);
+        if (key.startsWith(prefix)) return true;
+      } else {
+        if (key === pattern) return true;
+      }
+    }
+    return false;
   }
 
   private getNoteTypeWikiLink(itemType: string): string {

@@ -256,6 +256,20 @@ export class ZoteroAutoSyncSettingTab extends PluginSettingTab {
         }));
 
     new Setting(containerEl)
+      .setName('Preserved frontmatter keys')
+      .setDesc('Frontmatter properties to keep during sync. Use "key" for exact match or "prefix-*" for prefix match.')
+      .addTextArea(text => text
+        .setPlaceholder('ev-tables\nev-*\ncustom-field')
+        .setValue(this.plugin.settings.preservedFrontmatterKeys.join('\n'))
+        .onChange(async (value) => {
+          this.plugin.settings.preservedFrontmatterKeys = value
+            .split('\n')
+            .map(s => s.trim())
+            .filter(s => s.length > 0);
+          await this.plugin.saveSettings();
+        }));
+
+    new Setting(containerEl)
       .setName('Clear sync cache')
       .setDesc('Forces a full re-sync on next sync. Use if notes appear out of date.')
       .addButton(button => button
