@@ -355,19 +355,29 @@ export default class ZoteroConnectorPlugin extends Plugin {
     }
   }
 
+  private statusClearTimer: number | null = null;
+
   private updateStatusBar(state?: 'syncing', progress?: string): void {
     if (!this.statusBarEl) return;
+    if (this.statusClearTimer) { window.clearTimeout(this.statusClearTimer); this.statusClearTimer = null; }
 
     if (state === 'syncing') {
+      this.statusBarEl.style.display = "";
       this.statusBarEl.setText(progress ? `Zotero: syncing ${progress}` : 'Zotero: syncing...');
       return;
     }
 
     if (this.lastSyncTime) {
       const ago = this.timeSince(this.lastSyncTime);
+      this.statusBarEl.style.display = "";
       this.statusBarEl.setText(`Zotero: synced ${ago}`);
+      // Hide after 5 seconds
+      this.statusClearTimer = window.setTimeout(() => {
+        if (this.statusBarEl) { this.statusBarEl.setText(""); this.statusBarEl.style.display = "none"; }
+      }, 5000);
     } else {
-      this.statusBarEl.setText('Zotero: not synced');
+      this.statusBarEl.setText('');
+      this.statusBarEl.style.display = "none";
     }
   }
 
