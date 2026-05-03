@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Added
+
+- Public plugin API for guideline PDF imports (`api.importGuidelinePdf`) so other plugins can create Zotero guideline items, upload imported PDF attachments, apply sync tags, and receive Zotero item/attachment keys plus the synced literature-note path.
+- Shared Zotero item creation and imported-file upload helpers in the Zotero API client for API-driven workflows.
+- Public API helpers for triggering sync and finding literature notes by Zotero key.
+
 ## [1.0.0] - 2026-02-16
 
 ### Added
