@@ -452,6 +452,35 @@ export class ZoteroApiClient {
     }
   }
 
+  async patchItemData(itemKey: string, patch: Record<string, unknown>, version: number): Promise<boolean> {
+    try {
+      const response = await this.request(
+        `/items/${itemKey}`,
+        {},
+        {
+          method: 'PATCH',
+          body: JSON.stringify(patch),
+          headers: {
+            'If-Unmodified-Since-Version': String(version),
+          },
+        }
+      );
+      return response.status === 204 || response.status === 200;
+    } catch (e) {
+      const msg = (e as Error).message || '';
+      if (msg.includes('409')) {
+        console.warn(`[Zotero Connector] Version conflict patching item ${itemKey}, will retry after another sync`);
+        return false;
+      }
+      if (msg.includes('403')) {
+        console.warn(`[Zotero Connector] No write permission for ${itemKey}, skipping item patch`);
+        return false;
+      }
+      console.error(`[Zotero Connector] Failed to patch item ${itemKey}:`, e);
+      return false;
+    }
+  }
+
   clearCollectionCache(): void {
     this.collectionCache.clear();
   }

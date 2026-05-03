@@ -7,9 +7,11 @@ import { SyncManager, SyncResult } from './sync/sync-manager';
 import { VersionTracker } from './sync/version-tracker';
 import type {
   ZoteroConnectorApi,
+  ZoteroGuidelinePdfFinalizeInput,
   ZoteroGuidelinePdfImportInput,
   ZoteroGuidelinePdfImportResult,
 } from './api';
+import type { ZoteroTag } from './zotero/types';
 
 export default class ZoteroConnectorPlugin extends Plugin {
   settings: ZoteroAutoSyncSettings = DEFAULT_SETTINGS;
@@ -43,6 +45,7 @@ export default class ZoteroConnectorPlugin extends Plugin {
 
     this.api = {
       importGuidelinePdf: (input) => this.importGuidelinePdf(input),
+      finalizeGuidelinePdfImport: (input) => this.finalizeGuidelinePdfImport(input),
       syncNow: async (options) => {
         await this.runSync(options?.silent ?? false);
       },
@@ -179,6 +182,105 @@ export default class ZoteroConnectorPlugin extends Plugin {
       throw new Error('Configure Zotero Connector API credentials first.');
     }
 
+    if ((input.importMode || 'metadata-first') === 'metadata-first') {
+      return this.importGuidelinePdfForMetadata(input);
+    }
+
+    return this.importGuidelinePdfWithPlaceholderParent(input);
+  }
+
+  async finalizeGuidelinePdfImport(input: ZoteroGuidelinePdfFinalizeInput): Promise<ZoteroGuidelinePdfImportResult> {
+    if (!this.getApiKey() || !this.settings.userId) {
+      throw new Error('Configure Zotero Connector API credentials first.');
+    }
+
+    const attachment = await this.apiClient.fetchItem(input.attachmentKey);
+    if (!attachment) {
+      throw new Error(`Zotero attachment not found: ${input.attachmentKey}`);
+    }
+
+    const parentItemKey = attachment.data.parentItem;
+    const appliedTags = uniqueStrings(['obsidian', 'guidelines', this.settings.syncTag, ...(input.tags || [])]);
+    if (!parentItemKey) {
+      return {
+        zoteroItemKey: null,
+        zoteroAttachmentKey: input.attachmentKey,
+        appliedTags,
+        parentPending: true,
+      };
+    }
+
+    const parent = await this.apiClient.fetchItem(parentItemKey);
+    if (!parent) {
+      throw new Error(`Zotero parent item not found: ${parentItemKey}`);
+    }
+
+    const patch: Record<string, unknown> = {
+      tags: mergeZoteroTags(parent.data.tags || [], appliedTags),
+      extra: mergeGuidelineExtra(parent.data.extra, input.citekey),
+    };
+    const title = input.title?.trim();
+    if (title) patch.title = title;
+    const doi = input.doi?.trim();
+    if (doi) patch.DOI = doi;
+    const url = input.url?.trim();
+    if (url) patch.url = url;
+    const providerLabel = input.providerLabel?.trim();
+    if (providerLabel && !parent.data.publicationTitle) {
+      patch.publicationTitle = providerLabel;
+    }
+
+    const patched = await this.apiClient.patchItemData(parentItemKey, patch, parent.version);
+    if (!patched) {
+      throw new Error(`Could not apply guideline fields to Zotero parent item ${parentItemKey}.`);
+    }
+
+    let literatureNotePath: string | undefined;
+    if (input.syncNote !== false) {
+      await this.syncItemByKey(parentItemKey, true);
+      literatureNotePath = this.findLiteratureNoteByZoteroKey(parentItemKey)?.path;
+    }
+
+    return {
+      zoteroItemKey: parentItemKey,
+      zoteroAttachmentKey: input.attachmentKey,
+      literatureNotePath,
+      appliedTags,
+      parentPending: false,
+    };
+  }
+
+  private async importGuidelinePdfForMetadata(input: ZoteroGuidelinePdfImportInput): Promise<ZoteroGuidelinePdfImportResult> {
+    const appliedTags = uniqueStrings(['obsidian', 'guidelines', this.settings.syncTag, ...(input.tags || [])]);
+    const attachmentTitle = input.title?.trim() || input.filename.replace(/\.pdf$/i, '') || input.filename;
+    const attachmentPayload = {
+      itemType: 'attachment',
+      title: attachmentTitle,
+      linkMode: 'imported_file',
+      contentType: 'application/pdf',
+      filename: input.filename,
+    };
+
+    const attachmentData = await this.apiClient.createItems<ZoteroCreateResponse>([attachmentPayload]);
+    const zoteroAttachmentKey = extractCreatedKey(attachmentData);
+    if (!zoteroAttachmentKey) {
+      throw new Error(extractCreateFailureMessage(attachmentData) || 'Zotero attachment creation failed.');
+    }
+
+    const uploaded = await this.apiClient.uploadImportedFile(zoteroAttachmentKey, input.pdf, input.filename);
+    if (!uploaded) {
+      throw new Error('Zotero PDF upload failed.');
+    }
+
+    return {
+      zoteroItemKey: null,
+      zoteroAttachmentKey,
+      appliedTags,
+      parentPending: true,
+    };
+  }
+
+  private async importGuidelinePdfWithPlaceholderParent(input: ZoteroGuidelinePdfImportInput): Promise<ZoteroGuidelinePdfImportResult> {
     const providerLabel = input.providerLabel?.trim() || 'Guideline';
     const title = input.title?.trim() || input.filename.replace(/\.pdf$/i, '') || 'Untitled guideline';
     const appliedTags = uniqueStrings(['obsidian', 'guidelines', this.settings.syncTag, ...(input.tags || [])]);
@@ -232,6 +334,7 @@ export default class ZoteroConnectorPlugin extends Plugin {
       zoteroAttachmentKey,
       literatureNotePath,
       appliedTags,
+      parentPending: false,
     };
   }
 
@@ -509,6 +612,41 @@ function buildGuidelineExtra(citekey?: string): string {
     lines.push(`Citation Key: ${trimmedCitekey}`);
   }
   return lines.join('\n');
+}
+
+function mergeGuidelineExtra(existing: string | undefined, citekey?: string): string {
+  const lines = (existing || '')
+    .split(/\r?\n/)
+    .map(line => line.trim())
+    .filter(line => line && !/^type\s*:/i.test(line) && !/^citation key\s*:/i.test(line));
+  const result = ['Type: Guideline', ...lines];
+  const trimmedCitekey = citekey?.trim();
+  if (trimmedCitekey) {
+    result.push(`Citation Key: ${trimmedCitekey}`);
+  }
+  return result.join('\n');
+}
+
+function mergeZoteroTags(existing: ZoteroTag[], additions: string[]): ZoteroTag[] {
+  const seen = new Set<string>();
+  const result: ZoteroTag[] = [];
+  for (const tag of existing) {
+    const trimmed = tag.tag?.trim();
+    if (!trimmed) continue;
+    const key = trimmed.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(tag);
+  }
+  for (const tag of additions) {
+    const trimmed = tag.trim();
+    if (!trimmed) continue;
+    const key = trimmed.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push({ tag: trimmed });
+  }
+  return result;
 }
 
 function uniqueStrings(values: string[]): string[] {

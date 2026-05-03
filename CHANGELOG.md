@@ -12,6 +12,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Shared Zotero item creation and imported-file upload helpers in the Zotero API client for API-driven workflows.
 - Public API helpers for triggering sync and finding literature notes by Zotero key.
 - Guideline PDF import requests can now include an optional citekey, stored on the Zotero parent item as `Citation Key` in Extra for downstream note filename/rendering support.
+- Guideline PDF imports now support a metadata-first mode that uploads the PDF as a top-level Zotero attachment so Zotero's own "Create Parent Item from Metadata" action remains available.
+- Public API support for finalizing metadata-first guideline imports after Zotero creates the parent item, applying pending citekey, tags, title/URL/DOI overrides, sync tag, and literature-note sync.
 
 ### Fixed
 
