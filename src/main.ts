@@ -290,11 +290,11 @@ export default class ZoteroConnectorPlugin extends Plugin {
       title,
       abstractNote: '',
       publicationTitle: providerLabel,
-      date: '',
+      date: input.date?.trim() || '',
       DOI: input.doi || '',
       url: input.url || '',
       extra: buildGuidelineExtra(input.citekey),
-      creators: [],
+      creators: buildCreators(input.authorNames),
       tags: appliedTags.map(tag => ({ tag })),
     };
 
@@ -647,6 +647,22 @@ function mergeZoteroTags(existing: ZoteroTag[], additions: string[]): ZoteroTag[
     result.push({ tag: trimmed });
   }
   return result;
+}
+
+function buildCreators(authorNames: string[] | undefined): Array<{ creatorType: string; firstName?: string; lastName?: string; name?: string }> {
+  return uniqueStrings(authorNames || []).map((name) => {
+    const normalized = name.replace(/\s+/g, ' ').trim();
+    if (!normalized.includes(' ') || /\b(committee|society|association|college|network|group|richtlijn|werkgroep|task force)\b/i.test(normalized)) {
+      return { creatorType: 'author', name: normalized };
+    }
+    if (normalized.includes(',')) {
+      const [lastName, ...rest] = normalized.split(',').map(part => part.trim()).filter(Boolean);
+      return { creatorType: 'author', firstName: rest.join(' '), lastName };
+    }
+    const parts = normalized.split(' ');
+    const lastName = parts.pop() || normalized;
+    return { creatorType: 'author', firstName: parts.join(' '), lastName };
+  });
 }
 
 function uniqueStrings(values: string[]): string[] {

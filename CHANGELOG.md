@@ -14,6 +14,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Guideline PDF import requests can now include an optional citekey, stored on the Zotero parent item as `Citation Key` in Extra for downstream note filename/rendering support.
 - Guideline PDF imports now support a metadata-first mode that uploads the PDF as a top-level Zotero attachment so Zotero's own "Create Parent Item from Metadata" action remains available.
 - Public API support for finalizing metadata-first guideline imports after Zotero creates the parent item, applying pending citekey, tags, title/URL/DOI overrides, sync tag, and literature-note sync.
+- Guideline PDF import requests can provide extracted author names and publication date/year, which are written to the Zotero parent item alongside title, DOI, citekey, and tags.
 
 ### Fixed
 

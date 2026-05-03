@@ -8,6 +8,8 @@ export interface ZoteroGuidelinePdfImportInput {
   url?: string;
   doi?: string;
   citekey?: string;
+  authorNames?: string[];
+  date?: string;
   tags?: string[];
   pdf: ArrayBuffer;
   filename: string;
