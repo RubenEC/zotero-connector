@@ -86,6 +86,115 @@ export class ZoteroApiClient {
     return new Promise(resolve => setTimeout(resolve, ms));
   }
 
+  async createItems<T = unknown>(payloads: unknown[]): Promise<T> {
+    const response = await this.request(
+      '/items',
+      {},
+      {
+        method: 'POST',
+        body: JSON.stringify(payloads),
+      }
+    );
+    return response.json as T;
+  }
+
+  async uploadImportedFile(attachmentKey: string, file: ArrayBuffer, filename: string): Promise<boolean> {
+    const apiKey = this.getApiKey();
+    if (!apiKey) {
+      throw new Error('Zotero API key not configured. Set it in plugin settings.');
+    }
+
+    const md5 = require('crypto')
+      .createHash('md5')
+      .update(Buffer.from(file))
+      .digest('hex');
+
+    const fileUrl = `${BASE_URL}${this.libraryPrefix}/items/${attachmentKey}/file`;
+    const uploadParams = new URLSearchParams({
+      md5,
+      filename,
+      filesize: String(file.byteLength),
+      mtime: String(Date.now()),
+    });
+
+    const authResponse = await requestUrl({
+      url: fileUrl,
+      method: 'POST',
+      headers: {
+        'Zotero-API-Key': apiKey,
+        'Zotero-API-Version': API_VERSION,
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'If-None-Match': '*',
+      },
+      body: uploadParams.toString(),
+      throw: false,
+    });
+
+    if (authResponse.status !== 200) {
+      console.error(`[Zotero Connector] Zotero upload auth failed with status ${authResponse.status}: ${authResponse.text}`);
+      return false;
+    }
+
+    const authData = authResponse.json as {
+      exists?: number;
+      url?: string;
+      contentType?: string;
+      prefix?: string;
+      suffix?: string;
+      uploadKey?: string;
+    };
+
+    if (authData?.exists === 1) {
+      return true;
+    }
+
+    if (!authData?.url || !authData?.prefix || !authData?.suffix || !authData?.uploadKey) {
+      console.error('[Zotero Connector] Unexpected Zotero upload auth response', authData);
+      return false;
+    }
+
+    const prefixBytes = new TextEncoder().encode(authData.prefix);
+    const suffixBytes = new TextEncoder().encode(authData.suffix);
+    const fileBytes = new Uint8Array(file);
+    const body = new Uint8Array(prefixBytes.length + fileBytes.length + suffixBytes.length);
+    body.set(prefixBytes, 0);
+    body.set(fileBytes, prefixBytes.length);
+    body.set(suffixBytes, prefixBytes.length + fileBytes.length);
+
+    const uploadResponse = await requestUrl({
+      url: authData.url,
+      method: 'POST',
+      headers: { 'Content-Type': authData.contentType ?? 'multipart/form-data' },
+      body: body.buffer as ArrayBuffer,
+      throw: false,
+    });
+
+    if (uploadResponse.status !== 201 && uploadResponse.status !== 204) {
+      console.error(`[Zotero Connector] PDF upload to Zotero storage failed with status ${uploadResponse.status}`);
+      return false;
+    }
+
+    const registerResponse = await requestUrl({
+      url: fileUrl,
+      method: 'POST',
+      headers: {
+        'Zotero-API-Key': apiKey,
+        'Zotero-API-Version': API_VERSION,
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'If-None-Match': '*',
+      },
+      body: `upload=${authData.uploadKey}`,
+      throw: false,
+    });
+
+    if (registerResponse.status !== 204) {
+      console.error(`[Zotero Connector] Zotero upload registration failed with status ${registerResponse.status}`);
+      return false;
+    }
+
+    return true;
+  }
+
   async testConnection(): Promise<{ ok: boolean; message: string }> {
     try {
       const response = await this.request('/items', { limit: '1' });

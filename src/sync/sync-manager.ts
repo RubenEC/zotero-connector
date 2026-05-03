@@ -1,4 +1,4 @@
-import { App, Notice, TFile, TFolder, normalizePath } from 'obsidian';
+import { App, Notice, TAbstractFile, TFile, TFolder, normalizePath } from 'obsidian';
 import { ZoteroApiClient } from '../zotero/api-client';
 import { ZoteroItem, SyncItemData } from '../zotero/types';
 import { NoteRenderer } from '../renderer/note-renderer';
@@ -54,6 +54,86 @@ export class SyncManager {
 
   get syncing(): boolean {
     return this.isSyncing;
+  }
+
+  private escapeRegExp(value: string): string {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+
+  private getAbstractFileByPathInsensitive(path: string): TAbstractFile | null {
+    const normalized = normalizePath(path);
+    const exact = this.app.vault.getAbstractFileByPath(normalized);
+    if (exact) return exact;
+
+    const lowerPath = normalized.toLowerCase();
+    return this.app.vault.getAllLoadedFiles().find(file =>
+      file.path.toLowerCase() === lowerPath
+    ) || null;
+  }
+
+  private async findNoteByZoteroKey(itemKey: string): Promise<TFile | null> {
+    const folder = this.getAbstractFileByPathInsensitive(this.settings.outputFolder);
+    if (!folder || !(folder instanceof TFolder)) return null;
+
+    const files: TFile[] = [];
+    const collectFiles = (current: TFolder) => {
+      for (const child of current.children) {
+        if (child instanceof TFile && child.extension === 'md') {
+          files.push(child);
+        } else if (child instanceof TFolder) {
+          collectFiles(child);
+        }
+      }
+    };
+    collectFiles(folder);
+
+    const escapedKey = this.escapeRegExp(itemKey);
+    const frontmatterPattern = new RegExp(`^zotero-key:\\s*${escapedKey}\\s*$`, 'm');
+    const uriPattern = new RegExp(`zotero://select/(?:library|groups/\\d+)/items/${escapedKey}\\b`);
+
+    for (const file of files) {
+      const content = await this.app.vault.read(file);
+      if (frontmatterPattern.test(content) || uriPattern.test(content)) {
+        return file;
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Reconcile local tracking maps before syncing.
+   * If a tracked note was renamed manually, repair the filename map.
+   * If it was deleted, force-fetch the item so the note is recreated.
+   */
+  private async reconcileTrackedNotes(): Promise<{ missingKeys: Set<string>; errors: string[] }> {
+    const missingKeys = new Set<string>();
+    const errors: string[] = [];
+    const entries = Object.entries(this.settings.itemFilenames);
+    let changed = false;
+
+    for (const [itemKey, filename] of entries) {
+      const filePath = normalizePath(`${this.settings.outputFolder}/${filename}.md`);
+      const existingFile = this.getAbstractFileByPathInsensitive(filePath);
+      if (existingFile && existingFile instanceof TFile) continue;
+
+      const movedFile = await this.findNoteByZoteroKey(itemKey);
+      if (movedFile) {
+        this.settings.itemFilenames[itemKey] = movedFile.basename;
+        changed = true;
+        console.log(`[Zotero Connector] Repaired filename mapping for ${itemKey}: ${movedFile.basename}`);
+        continue;
+      }
+
+      missingKeys.add(itemKey);
+      console.log(`[Zotero Connector] Missing tracked note ${filename} (${itemKey}); will re-sync it`);
+    }
+
+    if (changed) {
+      await this.saveSettings();
+    }
+
+    return { missingKeys, errors };
   }
 
   // ── Tag sync helpers ──────────────────────────────────────────────────
@@ -210,12 +290,25 @@ export class SyncManager {
       // Fetch collections (cache them for this sync cycle)
       await this.apiClient.fetchCollections();
 
+      const trackedNoteState = await this.reconcileTrackedNotes();
+      result.errors.push(...trackedNoteState.errors);
+
       // Fetch items with sync tag, using incremental sync if possible
       const sinceVersion = this.versionTracker.getLibraryVersion();
       const { items, libraryVersion } = await this.apiClient.fetchItemsByTag(
         this.settings.syncTag,
         sinceVersion > 0 ? sinceVersion : undefined
       );
+
+      const missingKeys = [...trackedNoteState.missingKeys];
+      const fetchedKeys = new Set(items.map(item => item.key));
+      const missingKeysToFetch = missingKeys.filter(key => !fetchedKeys.has(key));
+      if (missingKeysToFetch.length > 0) {
+        const missingItems = await this.apiClient.fetchItemsByKeys(missingKeysToFetch);
+        items.push(...missingItems.filter(item =>
+          (item.data.tags || []).some(tag => tag.tag === this.settings.syncTag)
+        ));
+      }
 
       if (items.length === 0 && sinceVersion > 0) {
         // Nothing changed
@@ -502,9 +595,9 @@ export class SyncManager {
         const normalizedPath = normalizePath(imagePath);
 
         // Check if image already exists in vault
-        const existingFile = this.app.vault.getAbstractFileByPath(normalizedPath);
+        const existingFile = this.getAbstractFileByPathInsensitive(normalizedPath);
         if (existingFile && existingFile instanceof TFile) {
-          annotationImages.set(ann.key, normalizedPath);
+          annotationImages.set(ann.key, existingFile.path);
           continue;
         }
 
@@ -523,9 +616,11 @@ export class SyncManager {
 
         // Ensure folder exists and save image
         const folderPath = normalizedPath.substring(0, normalizedPath.lastIndexOf('/'));
-        await this.ensureFolderRecursive(folderPath);
-        await this.app.vault.createBinary(normalizedPath, imageData);
-        annotationImages.set(ann.key, normalizedPath);
+        const resolvedFolderPath = await this.ensureFolderRecursive(folderPath);
+        const imageFileName = normalizedPath.substring(normalizedPath.lastIndexOf('/') + 1);
+        const resolvedImagePath = normalizePath(`${resolvedFolderPath}/${imageFileName}`);
+        await this.app.vault.createBinary(resolvedImagePath, imageData);
+        annotationImages.set(ann.key, resolvedImagePath);
       } catch (e) {
         console.warn(`[Zotero Connector] Failed to process image annotation ${ann.key}:`, e);
       }
@@ -569,21 +664,28 @@ export class SyncManager {
     return !this.tagsEqual(fmTags, lastSynced);
   }
 
-  private async ensureFolderRecursive(folderPath: string): Promise<void> {
+  private async ensureFolderRecursive(folderPath: string): Promise<string> {
     const normalized = normalizePath(folderPath);
-    const existing = this.app.vault.getAbstractFileByPath(normalized);
-    if (existing && existing instanceof TFolder) return;
+    const existing = this.getAbstractFileByPathInsensitive(normalized);
+    if (existing && existing instanceof TFolder) return existing.path;
 
     // Split into parts and create each level
     const parts = normalized.split('/');
     let current = '';
     for (const part of parts) {
-      current = current ? `${current}/${part}` : part;
-      const folder = this.app.vault.getAbstractFileByPath(current);
-      if (!folder) {
+      const desired = current ? `${current}/${part}` : part;
+      const folder = this.getAbstractFileByPathInsensitive(desired);
+      if (folder && folder instanceof TFolder) {
+        current = folder.path;
+      } else if (!folder) {
+        current = desired;
         await this.app.vault.createFolder(current);
+      } else {
+        throw new Error(`Cannot create folder because a file exists at ${desired}`);
       }
     }
+
+    return current;
   }
 
   private async ensureFolder(folderPath: string): Promise<void> {

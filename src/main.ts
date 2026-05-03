@@ -5,9 +5,15 @@ import { ZoteroApiClient } from './zotero/api-client';
 import { NoteRenderer } from './renderer/note-renderer';
 import { SyncManager, SyncResult } from './sync/sync-manager';
 import { VersionTracker } from './sync/version-tracker';
+import type {
+  ZoteroConnectorApi,
+  ZoteroGuidelinePdfImportInput,
+  ZoteroGuidelinePdfImportResult,
+} from './api';
 
 export default class ZoteroConnectorPlugin extends Plugin {
   settings: ZoteroAutoSyncSettings = DEFAULT_SETTINGS;
+  api!: ZoteroConnectorApi;
   private apiClient!: ZoteroApiClient;
   private renderer!: NoteRenderer;
   private syncManager!: SyncManager;
@@ -34,6 +40,17 @@ export default class ZoteroConnectorPlugin extends Plugin {
       this.versionTracker,
       () => this.saveSettings()
     );
+
+    this.api = {
+      importGuidelinePdf: (input) => this.importGuidelinePdf(input),
+      syncNow: async (options) => {
+        await this.runSync(options?.silent ?? false);
+      },
+      syncItem: async (itemKey) => {
+        await this.syncItemByKey(itemKey);
+      },
+      findLiteratureNoteByZoteroKey: (itemKey) => this.findLiteratureNoteByZoteroKey(itemKey),
+    };
 
     // Ribbon icon
     this.addRibbonIcon('book-open', 'Zotero Connector: Sync now', async () => {
@@ -157,12 +174,83 @@ export default class ZoteroConnectorPlugin extends Plugin {
     return this.apiClient.testConnection();
   }
 
+  async importGuidelinePdf(input: ZoteroGuidelinePdfImportInput): Promise<ZoteroGuidelinePdfImportResult> {
+    if (!this.getApiKey() || !this.settings.userId) {
+      throw new Error('Configure Zotero Connector API credentials first.');
+    }
+
+    const providerLabel = input.providerLabel?.trim() || 'Guideline';
+    const title = input.title.trim() || input.filename.replace(/\.pdf$/i, '') || 'Untitled guideline';
+    const appliedTags = uniqueStrings(['obsidian', 'guidelines', this.settings.syncTag, ...(input.tags || [])]);
+
+    const itemPayload = {
+      itemType: 'journalArticle',
+      title,
+      abstractNote: '',
+      publicationTitle: providerLabel,
+      date: '',
+      DOI: input.doi || '',
+      url: input.url || '',
+      extra: 'Type: Guideline',
+      creators: [],
+      tags: appliedTags.map(tag => ({ tag })),
+    };
+
+    const createData = await this.apiClient.createItems<ZoteroCreateResponse>([itemPayload]);
+    const zoteroItemKey = extractCreatedKey(createData);
+    if (!zoteroItemKey) {
+      throw new Error(extractCreateFailureMessage(createData) || 'Zotero item creation failed.');
+    }
+
+    const attachmentPayload = {
+      itemType: 'attachment',
+      linkMode: 'imported_file',
+      contentType: 'application/pdf',
+      filename: input.filename,
+      parentItem: zoteroItemKey,
+    };
+
+    const attachmentData = await this.apiClient.createItems<ZoteroCreateResponse>([attachmentPayload]);
+    const zoteroAttachmentKey = extractCreatedKey(attachmentData);
+    if (!zoteroAttachmentKey) {
+      throw new Error(extractCreateFailureMessage(attachmentData) || 'Zotero attachment creation failed.');
+    }
+
+    const uploaded = await this.apiClient.uploadImportedFile(zoteroAttachmentKey, input.pdf, input.filename);
+    if (!uploaded) {
+      throw new Error('Zotero PDF upload failed.');
+    }
+
+    let literatureNotePath: string | undefined;
+    if (input.syncNote !== false) {
+      await this.syncItemByKey(zoteroItemKey, true);
+      literatureNotePath = this.findLiteratureNoteByZoteroKey(zoteroItemKey)?.path;
+    }
+
+    return {
+      zoteroItemKey,
+      zoteroAttachmentKey,
+      literatureNotePath,
+      appliedTags,
+    };
+  }
+
   async clearSyncCache(): Promise<void> {
     await this.versionTracker.clearAll();
     this.settings.itemFilenames = {};
     this.settings.lastSyncedTags = {};
     await this.saveSettings();
     this.apiClient.clearCollectionCache();
+  }
+
+  findLiteratureNoteByZoteroKey(itemKey: string): TFile | null {
+    for (const file of this.app.vault.getMarkdownFiles()) {
+      const cache = this.app.metadataCache.getFileCache(file);
+      if (cache?.frontmatter?.['zotero-key'] === itemKey) {
+        return file;
+      }
+    }
+    return null;
   }
 
   // ── Sync ────────────────────────────────────────────────────────────
@@ -212,17 +300,26 @@ export default class ZoteroConnectorPlugin extends Plugin {
     }
 
     const itemKey = keyMatch[1].trim();
+    await this.syncItemByKey(itemKey);
+  }
+
+  private async syncItemByKey(itemKey: string, silent = false): Promise<void> {
     this.updateStatusBar('syncing');
 
     try {
       const result = await this.syncManager.syncSingleItem(itemKey);
       this.lastSyncTime = new Date();
-      this.showSyncResult(result, false);
+      this.showSyncResult(result, silent);
     } catch (e) {
-      new Notice(`Zotero sync failed: ${(e as Error).message}`);
+      if (!silent) {
+        new Notice(`Zotero sync failed: ${(e as Error).message}`);
+      }
+      if (silent) {
+        throw e;
+      }
+    } finally {
+      this.updateStatusBar();
     }
-
-    this.updateStatusBar();
   }
 
   private async registerExistingNotes(): Promise<void> {
@@ -389,4 +486,32 @@ export default class ZoteroConnectorPlugin extends Plugin {
     const hours = Math.floor(minutes / 60);
     return `${hours}h ago`;
   }
+}
+
+interface ZoteroCreateResponse {
+  successful?: Record<string, { key: string }>;
+  success?: Record<string, string>;
+  failed?: Record<string, { code?: number; message?: string }>;
+}
+
+function extractCreatedKey(response: ZoteroCreateResponse): string {
+  return response?.successful?.['0']?.key ?? response?.success?.['0'] ?? '';
+}
+
+function extractCreateFailureMessage(response: ZoteroCreateResponse): string | undefined {
+  return response?.failed?.['0']?.message;
+}
+
+function uniqueStrings(values: string[]): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const value of values) {
+    const trimmed = value.trim();
+    if (!trimmed) continue;
+    const key = trimmed.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(trimmed);
+  }
+  return result;
 }
