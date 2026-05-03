@@ -305,9 +305,20 @@ export class SyncManager {
       const missingKeysToFetch = missingKeys.filter(key => !fetchedKeys.has(key));
       if (missingKeysToFetch.length > 0) {
         const missingItems = await this.apiClient.fetchItemsByKeys(missingKeysToFetch);
-        items.push(...missingItems.filter(item =>
+        const syncableMissingItems = missingItems.filter(item =>
           (item.data.tags || []).some(tag => tag.tag === this.settings.syncTag)
-        ));
+        );
+        items.push(...syncableMissingItems);
+
+        const syncableMissingKeys = new Set(syncableMissingItems.map(item => item.key));
+        const staleMissingKeys = missingKeysToFetch.filter(key => !syncableMissingKeys.has(key));
+        if (staleMissingKeys.length > 0) {
+          for (const key of staleMissingKeys) {
+            this.clearTrackedItem(key);
+          }
+          await this.saveSettings();
+          console.log(`[Zotero Connector] Cleared ${staleMissingKeys.length} stale tracked note mapping(s) for items without the sync tag or no longer found in Zotero`);
+        }
       }
 
       if (items.length === 0 && sinceVersion > 0) {
@@ -686,6 +697,12 @@ export class SyncManager {
     }
 
     return current;
+  }
+
+  private clearTrackedItem(itemKey: string): void {
+    delete this.settings.itemFilenames[itemKey];
+    delete this.settings.itemVersions[itemKey];
+    delete this.settings.lastSyncedTags[itemKey];
   }
 
   private async ensureFolder(folderPath: string): Promise<void> {

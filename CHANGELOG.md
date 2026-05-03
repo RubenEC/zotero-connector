@@ -11,6 +11,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Public plugin API for guideline PDF imports (`api.importGuidelinePdf`) so other plugins can create Zotero guideline items, upload imported PDF attachments, apply sync tags, and receive Zotero item/attachment keys plus the synced literature-note path.
 - Shared Zotero item creation and imported-file upload helpers in the Zotero API client for API-driven workflows.
 - Public API helpers for triggering sync and finding literature notes by Zotero key.
+- Guideline PDF import requests can now include an optional citekey, stored on the Zotero parent item as `Citation Key` in Extra for downstream note filename/rendering support.
+
+### Fixed
+
+- Stale tracked-note mappings are now cleared when the remembered note file is missing and Zotero no longer returns the item as sync-tagged, avoiding repeated `Missing tracked note ... will re-sync it` console messages.
 
 ## [1.0.0] - 2026-02-16
 

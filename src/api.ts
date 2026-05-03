@@ -1,10 +1,11 @@
 import type { TFile } from 'obsidian';
 
 export interface ZoteroGuidelinePdfImportInput {
-  title: string;
+  title?: string;
   providerLabel?: string;
   url?: string;
   doi?: string;
+  citekey?: string;
   tags?: string[];
   pdf: ArrayBuffer;
   filename: string;
@@ -24,4 +25,3 @@ export interface ZoteroConnectorApi {
   syncItem(itemKey: string): Promise<void>;
   findLiteratureNoteByZoteroKey(itemKey: string): TFile | null;
 }
-

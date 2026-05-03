@@ -180,7 +180,7 @@ export default class ZoteroConnectorPlugin extends Plugin {
     }
 
     const providerLabel = input.providerLabel?.trim() || 'Guideline';
-    const title = input.title.trim() || input.filename.replace(/\.pdf$/i, '') || 'Untitled guideline';
+    const title = input.title?.trim() || input.filename.replace(/\.pdf$/i, '') || 'Untitled guideline';
     const appliedTags = uniqueStrings(['obsidian', 'guidelines', this.settings.syncTag, ...(input.tags || [])]);
 
     const itemPayload = {
@@ -191,7 +191,7 @@ export default class ZoteroConnectorPlugin extends Plugin {
       date: '',
       DOI: input.doi || '',
       url: input.url || '',
-      extra: 'Type: Guideline',
+      extra: buildGuidelineExtra(input.citekey),
       creators: [],
       tags: appliedTags.map(tag => ({ tag })),
     };
@@ -500,6 +500,15 @@ function extractCreatedKey(response: ZoteroCreateResponse): string {
 
 function extractCreateFailureMessage(response: ZoteroCreateResponse): string | undefined {
   return response?.failed?.['0']?.message;
+}
+
+function buildGuidelineExtra(citekey?: string): string {
+  const lines = ['Type: Guideline'];
+  const trimmedCitekey = citekey?.trim();
+  if (trimmedCitekey) {
+    lines.push(`Citation Key: ${trimmedCitekey}`);
+  }
+  return lines.join('\n');
 }
 
 function uniqueStrings(values: string[]): string[] {
